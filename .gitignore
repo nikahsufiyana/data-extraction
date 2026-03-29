@@ -1,0 +1,54 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build output ──────────────────────────────────────────────────────────────
+.next/
+out/
+dist/
+build/
+
+# ── TypeScript ────────────────────────────────────────────────────────────────
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# ── Environment variables (never commit secrets) ──────────────────────────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ── Python ────────────────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+
+# ── macOS junk ────────────────────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+._*
+**/._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+
+# ── Editor ────────────────────────────────────────────────────────────────────
+.vscode/
+*.swp
+*.swo
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+styles/globals.css
