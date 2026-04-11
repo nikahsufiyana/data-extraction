@@ -8,11 +8,12 @@ const DELIMITER = "|";
 const MATRIMONIAL_COLUMNS =
   "Name|Gender|Age|Height|Education|Profession|Location|Marital Status|Sect|Family Details|Requirements|Contact Numbers|Tags";
 
-// Models to try in order — fall back if one is overloaded
+// Models to try in order — fall back if one is overloaded or unavailable
+// gemini-2.0-flash was retired; gemini-2.5-flash-preview-04-17 is the current stable preview
 const MODEL_FALLBACK_CHAIN = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
+  "gemini-2.5-flash-preview-04-17",
   "gemini-1.5-flash",
+  "gemini-1.5-flash-8b",
 ];
 
 /**
@@ -43,6 +44,17 @@ async function generateWithRetry(
           msg.includes("overloaded") ||
           msg.includes("429") ||
           msg.includes("Too Many Requests");
+
+        // 404 = model retired/unavailable — skip to next model immediately
+        const isModelGone =
+          msg.includes("404") ||
+          msg.includes("Not Found") ||
+          msg.includes("no longer available");
+
+        if (isModelGone) {
+          console.warn(`[gemini] ${modelName} is unavailable (${msg.slice(0, 80)}). Skipping to next model…`);
+          break; // break inner loop, try next model
+        }
 
         if (!isRetryable) throw err; // hard error — don't retry
 
