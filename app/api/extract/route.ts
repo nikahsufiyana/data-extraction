@@ -50,10 +50,17 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[v0] API Error:", error);
+    const msg = error instanceof Error ? error.message : "Failed to extract data";
+    const isOverloaded =
+      msg.includes("503") ||
+      msg.includes("Service Unavailable") ||
+      msg.includes("high demand") ||
+      msg.includes("overloaded");
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Failed to extract data",
+        error: isOverloaded
+          ? "Gemini AI is currently overloaded. Please wait a moment and try again."
+          : msg,
       },
       { status: 500 }
     );

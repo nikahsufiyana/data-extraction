@@ -8,11 +8,66 @@ const DELIMITER = "|";
 const MATRIMONIAL_COLUMNS =
   "Name|Gender|Age|Height|Education|Profession|Location|Marital Status|Sect|Family Details|Requirements|Contact Numbers|Tags";
 
+// Models to try in order — fall back if one is overloaded
+const MODEL_FALLBACK_CHAIN = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+];
+
+/**
+ * Calls generateContent with automatic retry + exponential backoff.
+ * Falls back through MODEL_FALLBACK_CHAIN on 503/overloaded errors.
+ */
+async function generateWithRetry(
+  promptParts: Parameters<ReturnType<typeof client.getGenerativeModel>["generateContent"]>[0],
+  maxRetries = 3,
+  baseDelayMs = 1500
+): Promise<string> {
+  let lastError: unknown;
+
+  for (const modelName of MODEL_FALLBACK_CHAIN) {
+    const model = client.getGenerativeModel({ model: modelName });
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const result = await model.generateContent(promptParts);
+        return result.response.text().trim();
+      } catch (err: unknown) {
+        lastError = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        const isRetryable =
+          msg.includes("503") ||
+          msg.includes("Service Unavailable") ||
+          msg.includes("high demand") ||
+          msg.includes("overloaded") ||
+          msg.includes("429") ||
+          msg.includes("Too Many Requests");
+
+        if (!isRetryable) throw err; // hard error — don't retry
+
+        if (attempt < maxRetries) {
+          const delay = baseDelayMs * Math.pow(2, attempt - 1); // 1.5s, 3s, 6s
+          console.warn(
+            `[gemini] ${modelName} attempt ${attempt} failed (${msg.slice(0, 80)}). Retrying in ${delay}ms…`
+          );
+          await new Promise((r) => setTimeout(r, delay));
+        } else {
+          console.warn(
+            `[gemini] ${modelName} exhausted ${maxRetries} retries. Trying next model…`
+          );
+        }
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 export async function extractDataFromImage(
   imageBase64: string,
   mimeType: string
 ): Promise<string> {
-  const model = client.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const extractPrompt = `You are a matrimonial data extraction specialist for an Urdu/English newspaper.
 
@@ -46,12 +101,10 @@ OUTPUT FORMAT:
 - Do NOT quote fields
 - Return ONLY the pipe-delimited data. No markdown, no extra text, no code blocks.`;
 
-  const extractResponse = await model.generateContent([
+  const rawPsv = await generateWithRetry([
     { inlineData: { data: imageBase64, mimeType } },
     extractPrompt,
   ]);
-
-  const rawPsv = extractResponse.response.text().trim();
 
   // Second pass: refine & validate
   const refinePrompt = `You are a HIGH-ACCURACY DATA REFINEMENT ENGINE for matrimonial listings.
@@ -105,8 +158,7 @@ STRICT RULES:
 - DO NOT add rows that weren't in input.
 - Return ONLY the pipe-delimited data with header row. No markdown, no code blocks, no extra text.`;
 
-  const refineResponse = await model.generateContent(refinePrompt);
-  const refinedPsv = refineResponse.response.text().trim();
+  const refinedPsv = await generateWithRetry(refinePrompt);
 
   // Convert pipe-delimited back to proper CSV
   return psvToCsv(refinedPsv, DELIMITER);
