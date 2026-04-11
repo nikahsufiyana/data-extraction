@@ -9,11 +9,12 @@ const MATRIMONIAL_COLUMNS =
   "Name|Gender|Age|Height|Education|Profession|Location|Marital Status|Sect|Family Details|Requirements|Contact Numbers|Tags";
 
 // Models to try in order — fall back if one is overloaded or unavailable
-// gemini-2.0-flash was retired; gemini-2.5-flash-preview-04-17 is the current stable preview
+// Only models confirmed available via the Gemini API (generateContent supported)
 const MODEL_FALLBACK_CHAIN = [
-  "gemini-2.5-flash-preview-04-17",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b",
+  "gemini-2.5-flash",        // Latest stable Flash — fast & capable
+  "gemini-2.0-flash",        // Previous-gen Flash fallback
+  "gemini-2.0-flash-lite",   // Lightweight fallback for high-load periods
+  "gemini-2.5-flash-lite",   // New lite model as last resort
 ];
 
 /**
