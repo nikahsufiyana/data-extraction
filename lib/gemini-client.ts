@@ -5,8 +5,9 @@ const client = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!)
 // Use pipe as delimiter to avoid collision with commas inside field values
 const DELIMITER = "|";
 
+// Full extraction schema as requested by user
 const MATRIMONIAL_COLUMNS =
-  "Name|Gender|Age|Height|Education|Profession|Location|Marital Status|Sect|Family Details|Requirements|Contact Numbers|Tags";
+  "id|email|name|password|age|gender|location|city|country|education|profession|sect|height|marital_status|complexion|income|housing|show_photos|profile_photo|profile_photos|premium_plan|premium_expiry|premium_admin_approved|premium_approved_by|verified|last_active|profile_status|show_contact_info|hide_profile|subscription|phone|created_at|updated_at|is_verified|is_active|role|full_name|country_code|whatsapp_number|address|marriage_timeline|about_me|marital_status_other|education_details|job_title|family_details|father_name|father_occupation|father_mobile|mother_name|mother_occupation|mother_occupation_other|mother_mobile|housing_status|housing_status_other|siblings|brother_in_laws|maternal_paternal|grandparents|preferred_age_min|preferred_age_max|preferred_education|preferred_location|preferred_occupation|preferred_height|preferred_complexion|preferred_maslak|expectations|religious_inclination|show_online_status|show_registered_mobile|show_father_mobile|show_mother_mobile|show_father_number|show_mother_number|mobile_number|contact_info_visibility|profile_visibility|date_of_birth|skin_color|religion|state|company|family_type|family_values|bio|description|partner_preferences|preferred_height_min|preferred_height_max|preferred_profession|preferred_marital_status|whatsapp|profile_completion|is_premium|image|photo|photos|gallery_photos|needs_password_setup";
 
 // Models to try in order — fall back if one is overloaded or unavailable
 // Only models confirmed available via the Gemini API (generateContent supported)
@@ -91,24 +92,12 @@ CRITICAL: Use PIPE character | as the column separator. Do NOT use commas as sep
 Each profile = one row. Never merge two profiles into one row.
 
 FIELD RULES:
-1. Name: person's name if visible, else leave blank.
-2. Gender: "Boy" or "Girl" only.
-   - Boy keywords: boy, son, groom, dulha, brother, he, male, wanted bride
-   - Girl keywords: girl, daughter, bride, dulhan, sister, she, female, wanted groom
-3. Age: number only (e.g. "29 yrs" → 29). Ranges ok (28-30).
-4. Height: X'Y" format only (e.g. 5'8"). No other format.
-5. Education: degree only (BA, BSc, MBA, MBBS, BE, etc.).
-6. Profession: normalized title (Software Engineer, Doctor, Engineer, Government Job, Business).
-7. Location: city/country only (UAE, Dubai, KSA, USA, UK, Australia, Canada, Hyderabad, etc.)
-8. Marital Status: Unmarried / Divorced / Widowed / Second Marriage
-9. Sect: Sunni / Shia / Deobandi / Barelvi / Fateha Parood / etc. Blank if unknown.
-10. Family Details: brief background only (caste, city of origin, family type).
-11. Requirements: what the profile seeks in a partner. No phone numbers, no "urgent".
-12. Contact Numbers: all phone numbers for THIS profile only, separated by " , ". No duplicates.
-13. Tags: from this list only, separated by " , ": Urgent, NRI, Dubai, KSA, USA, UK, Australia, Canada, Doctor, Engineer, Software Engineer, Government Job, Business, Divorced, Widow, Second Marriage
+- If a field is not present or not visible in the image, output "-" (a single dash character) for that field.
+- Do not hallucinate or guess missing data.
+- Use the exact column order above.
 
 OUTPUT FORMAT:
-- First row = header: Name|Gender|Age|Height|Education|Profession|Location|Marital Status|Sect|Family Details|Requirements|Contact Numbers|Tags
+- First row = header: ${MATRIMONIAL_COLUMNS}
 - Each subsequent row = one profile
 - Separate columns with | only
 - Do NOT quote fields
@@ -128,46 +117,14 @@ INPUT DATA:
 ${rawPsv}
 
 COLUMNS (keep exactly in this order):
-Name|Gender|Age|Height|Education|Profession|Location|Marital Status|Sect|Family Details|Requirements|Contact Numbers|Tags
+${MATRIMONIAL_COLUMNS}
 
 RULES:
-
-NAME: Person's name if visible. Leave blank if not in source.
-
-GENDER: "Boy" or "Girl" only. Detect from all text in the row.
-
-AGE: Number only. "29 yrs" → 29. Range "28-30" ok. Blank if unparseable.
-
-HEIGHT: Must be X'Y" format. 5.8 → 5'8" | 5'08" → 5'8" | 5 feet 8 → 5'8". Blank if unparseable.
-
-EDUCATION: Actual degree only: BA, BSc, MBA, MBBS, BE, MCA, LLB, MS, etc. Strip vague words.
-
-PROFESSION: Normalize:
-  - Software Engr / Software Dev → Software Engineer
-  - Engineer / Engr / BE → Engineer
-  - Doctor / MBBS / MD → Doctor
-  - Govt Job → Government Job
-  - Businessman → Business
-
-LOCATION: Place names only. UAE, Dubai, KSA, USA, UK, Australia, Canada, Hyderabad, etc.
-
-MARITAL STATUS: Unmarried / Divorced / Widowed / Second Marriage. Blank if unknown.
-
-SECT: Sunni / Shia / Deobandi / Barelvi / Fateha Parood / Wahabi. Blank if not mentioned.
-
-FAMILY DETAILS: Background only. Remove phone numbers, requirements, noise words.
-
-REQUIREMENTS: What they seek. Remove phone numbers, "urgent", "call now".
-
-CONTACT NUMBERS: Phone numbers for THIS profile only. Separate with " , ". Remove duplicates.
-
-TAGS: Only from: Urgent, NRI, Dubai, KSA, USA, UK, Australia, Canada, Doctor, Engineer, Software Engineer, Government Job, Business, Divorced, Widow, Second Marriage
-Separate with " , ". Blank if none apply.
-
-STRICT RULES:
+- If a field is not present or not visible in the image, output "-" (a single dash character) for that field.
+- Do not hallucinate or guess missing data.
+- Use the exact column order above.
 - Use PIPE | as delimiter. NO commas as delimiters.
 - DO NOT merge rows.
-- DO NOT hallucinate. Leave blank if unsure.
 - DO NOT add rows that weren't in input.
 - Return ONLY the pipe-delimited data with header row. No markdown, no code blocks, no extra text.`;
 
