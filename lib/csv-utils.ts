@@ -2,9 +2,6 @@ export interface DataRow {
   [key: string]: string;
 }
 
-// Canonical column count — used for row repair
-const EXPECTED_COLUMN_COUNT = 13; // Name + 12 original columns
-
 export function parseCSV(csvContent: string): {
   headers: string[];
   rows: DataRow[];

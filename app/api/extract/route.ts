@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extractDataFromImage } from "@/lib/gemini-client";
+import { extractDataFromImage, extractDataFromText } from "@/lib/gemini-client";
 import { parseCSV } from "@/lib/csv-utils";
 import { normalizeDataRows, MATRIMONIAL_HEADERS } from "@/lib/data-validator";
 
@@ -15,18 +15,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!file.type.startsWith("image/")) {
+    const buffer = await file.arrayBuffer();
+    const isImage = file.type.startsWith("image/");
+    const isText = file.type.startsWith("text/") || file.name.toLowerCase().endsWith(".txt");
+    let csvContent = "";
+
+    if (isImage) {
+      const base64 = Buffer.from(buffer).toString("base64");
+      csvContent = await extractDataFromImage(base64, file.type);
+    } else if (isText) {
+      const textContent = Buffer.from(buffer).toString("utf8");
+      csvContent = await extractDataFromText(textContent);
+    } else {
       return NextResponse.json(
-        { error: "File must be an image" },
+        { error: "File must be an image or .txt text export" },
         { status: 400 }
       );
     }
-
-    const buffer = await file.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString("base64");
-
-    // Two-pass: extract + AI-refine via Gemini, then client-side normalize
-    const csvContent = await extractDataFromImage(base64, file.type);
 
     const { headers: rawHeaders, rows: rawRows } = parseCSV(csvContent);
 

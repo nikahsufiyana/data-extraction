@@ -5,9 +5,10 @@ const client = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!)
 // Use pipe as delimiter to avoid collision with commas inside field values
 const DELIMITER = "|";
 
-// Full extraction schema as requested by user
+// IMPORTANT: keep only the matrimonial-relevant extraction schema
+// This prevents misalignment/pollution of "phone" with unrelated fields.
 const MATRIMONIAL_COLUMNS =
-  "id|email|name|password|age|gender|location|city|country|education|profession|sect|height|marital_status|complexion|income|housing|show_photos|profile_photo|profile_photos|premium_plan|premium_expiry|premium_admin_approved|premium_approved_by|verified|last_active|profile_status|show_contact_info|hide_profile|subscription|phone|created_at|updated_at|is_verified|is_active|role|full_name|country_code|whatsapp_number|address|marriage_timeline|about_me|marital_status_other|education_details|job_title|family_details|father_name|father_occupation|father_mobile|mother_name|mother_occupation|mother_occupation_other|mother_mobile|housing_status|housing_status_other|siblings|brother_in_laws|maternal_paternal|grandparents|preferred_age_min|preferred_age_max|preferred_education|preferred_location|preferred_occupation|preferred_height|preferred_complexion|preferred_maslak|expectations|religious_inclination|show_online_status|show_registered_mobile|show_father_mobile|show_mother_mobile|show_father_number|show_mother_number|mobile_number|contact_info_visibility|profile_visibility|date_of_birth|skin_color|religion|state|company|family_type|family_values|bio|description|partner_preferences|preferred_height_min|preferred_height_max|preferred_profession|preferred_marital_status|whatsapp|profile_completion|is_premium|image|photo|photos|gallery_photos|needs_password_setup";
+  "Name|Gender|Age|Height|Education|Profession|Location|Marital Status|Sect|Family Details|Father Name|Father Occupation|Mother Name|Mother Occupation|Siblings|Brothers|Sisters|Brother In Laws|Sister In Laws|Grandparents|Requirements|Contact Numbers|Tags|Image";
 
 // Models to try in order — fall back if one is overloaded or unavailable
 // Only models confirmed available via the Gemini API (generateContent supported)
@@ -17,6 +18,31 @@ const MODEL_FALLBACK_CHAIN = [
   "gemini-2.0-flash-lite",   // Lightweight fallback for high-load periods
   "gemini-2.5-flash-lite",   // New lite model as last resort
 ];
+
+const TRANSLATE_TO_ROMAN_COLUMNS = [
+  "Family Details",
+  "Father Name",
+  "Father Occupation",
+  "Mother Name",
+  "Mother Occupation",
+  "Siblings",
+  "Brothers",
+  "Sisters",
+  "Brother In Laws",
+  "Sister In Laws",
+  "Grandparents",
+  "Education",
+  "Profession",
+  "Location",
+  "Sect",
+  "Requirements",
+  "Tags",
+] as const;
+
+function containsUrduScript(text: string): boolean {
+  // Arabic script range covers Urdu (and Arabic/Persian). Good-enough detection.
+  return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text);
+}
 
 /**
  * Calls generateContent with automatic retry + exponential backoff.
@@ -78,6 +104,61 @@ async function generateWithRetry(
   throw lastError;
 }
 
+async function translatePsvToRoman(psv: string): Promise<string> {
+  const lines = psv
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("```"));
+
+  if (lines.length <= 1) return psv;
+
+  const header = lines[0].split(DELIMITER).map((h) => h.trim());
+  const translateIdx = new Set<number>();
+  header.forEach((h, idx) => {
+    if ((TRANSLATE_TO_ROMAN_COLUMNS as readonly string[]).includes(h)) translateIdx.add(idx);
+  });
+
+  // If there are no target columns, skip.
+  if (translateIdx.size === 0) return psv;
+
+  // Quick scan: if none of the targeted cells contain Urdu script, skip translation call.
+  let needsTranslation = false;
+  for (let i = 1; i < lines.length && !needsTranslation; i++) {
+    const cells = lines[i].split(DELIMITER);
+    for (const idx of translateIdx) {
+      const v = (cells[idx] ?? "").trim();
+      if (v && v !== "-" && containsUrduScript(v)) {
+        needsTranslation = true;
+        break;
+      }
+    }
+  }
+  if (!needsTranslation) return psv;
+
+  const translatePrompt = `You are a translation + transliteration engine for Urdu matrimonial listings.
+
+You will receive pipe-delimited (|) tabular data.
+
+TASK:
+- Keep the table structure EXACTLY the same: same header, same number of rows, same column order, same delimiter |.
+- Translate ONLY the columns listed below to Roman English/Roman Urdu (Latin letters).
+- Do NOT translate names into different people; preserve names, but romanize Urdu script.
+- Keep phone numbers exactly as-is.
+- If a cell is "-" keep it as "-".
+- Do not add/remove rows. Do not add extra commentary.
+
+TRANSLATE THESE COLUMNS ONLY (if present in the header):
+${TRANSLATE_TO_ROMAN_COLUMNS.join(", ")}
+
+INPUT TABLE:
+${lines.join("\n")}
+
+OUTPUT:
+Return ONLY the updated pipe-delimited table (header + rows).`;
+
+  return await generateWithRetry(translatePrompt);
+}
+
 export async function extractDataFromImage(
   imageBase64: string,
   mimeType: string
@@ -95,6 +176,13 @@ FIELD RULES:
 - If a field is not present or not visible in the image, output "-" (a single dash character) for that field.
 - Do not hallucinate or guess missing data.
 - Use the exact column order above.
+- Put parent names/occupations in the dedicated fields (Father/Mother columns) instead of mixing inside "Family Details" when possible.
+- For siblings/in-laws:
+  - "Siblings" = short summary like "1 brother, 2 sisters" if known, else "-"
+  - "Brothers"/"Sisters"/"Brother In Laws"/"Sister In Laws" can contain names + brief notes (married/location/job) if present, else "-"
+- "Grandparents" = any available paternal/maternal/grandparents info, else "-"
+- "Contact Numbers" must contain ONLY phone/WhatsApp/mobile numbers found in the profile (for multiple numbers use comma separation, never pipe inside field). Do not put addresses/education here.
+- "Tags" is optional; if unsure, output "-".
 
 OUTPUT FORMAT:
 - First row = header: ${MATRIMONIAL_COLUMNS}
@@ -126,12 +214,17 @@ RULES:
 - Use PIPE | as delimiter. NO commas as delimiters.
 - DO NOT merge rows.
 - DO NOT add rows that weren't in input.
+- Ensure "Contact Numbers" contains only phone/WhatsApp/mobile numbers (no addresses, no education text).
+- If multiple numbers exist in one profile, separate them with commas only (never use pipe inside a field).
 - Return ONLY the pipe-delimited data with header row. No markdown, no code blocks, no extra text.`;
 
   const refinedPsv = await generateWithRetry(refinePrompt);
 
+  // Third pass: translate Urdu-script cells into Roman English/Roman Urdu (Latin)
+  const translatedPsv = await translatePsvToRoman(refinedPsv);
+
   // Convert pipe-delimited back to proper CSV
-  return psvToCsv(refinedPsv, DELIMITER);
+  return psvToCsv(translatedPsv, DELIMITER);
 }
 
 /**
@@ -159,4 +252,187 @@ function psvToCsv(psv: string, delimiter: string = "|"): string {
   });
 
   return csvLines.join("\n");
+}
+
+function splitTextIntoChunks(input: string, maxChars = 18000): string[] {
+  const lines = input.split("\n");
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let size = 0;
+
+  const pushCurrent = () => {
+    if (current.length > 0) chunks.push(current.join("\n"));
+    current = [];
+    size = 0;
+  };
+
+  for (const line of lines) {
+    const l = line ?? "";
+    const next = l.length + 1;
+    if (size + next > maxChars && current.length > 0) {
+      pushCurrent();
+    }
+    current.push(l);
+    size += next;
+  }
+  pushCurrent();
+  return chunks;
+}
+
+function parseWhatsAppMessages(raw: string): string[] {
+  const lines = raw.split("\n");
+  const messages: string[] = [];
+  const timestampRe = /^\d{1,2}\/\d{1,2}\/\d{2},\s+\d{1,2}:\d{2}/;
+  let current = "";
+
+  for (const line of lines) {
+    if (timestampRe.test(line)) {
+      if (current.trim()) messages.push(current.trim());
+      const parts = line.split(" - ");
+      current = parts.length > 1 ? parts.slice(1).join(" - ").trim() : line.trim();
+    } else {
+      current += `${current ? "\n" : ""}${line}`;
+    }
+  }
+  if (current.trim()) messages.push(current.trim());
+  return messages;
+}
+
+function selectLikelyBiodataMessages(messages: string[]): string[] {
+  const keywords = [
+    "bio data", "biodata", "full name", "name:", "age", "height", "complexion",
+    "education", "qualification", "job", "occupation", "work", "salary", "income",
+    "family details", "father", "mother", "brother", "sister", "in law", "grand",
+    "marital status", "sect", "maslak", "requirement", "preference", "contact",
+    "phone", "mobile", "residence", "native place",
+  ];
+
+  const adminNoise = [
+    "joined using a group link",
+    "<media omitted>",
+    "messages and calls are end-to-end encrypted",
+    "this message was deleted",
+    "join group",
+    "we don't have any agents",
+  ];
+
+  const likely: string[] = [];
+  for (const msg of messages) {
+    const low = msg.toLowerCase();
+    if (adminNoise.some((n) => low.includes(n))) continue;
+    if (msg.length < 40) continue;
+    const hits = keywords.reduce((acc, k) => acc + (low.includes(k) ? 1 : 0), 0);
+    if (hits >= 2 || msg.length > 300) likely.push(msg);
+  }
+  return likely;
+}
+
+function extractPsvRows(psv: string): string[] {
+  return psv
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("```"));
+}
+
+function dedupePsvRows(rows: string[]): string[] {
+  if (rows.length <= 2) return rows;
+  const header = rows[0];
+  const body = rows.slice(1);
+  const seen = new Set<string>();
+  const out: string[] = [header];
+  for (const row of body) {
+    // Keep stable dedupe key resilient to spacing
+    const key = row.toLowerCase().replace(/\s+/g, " ").trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+
+export async function extractDataFromText(rawText: string): Promise<string> {
+  const trimmed = rawText.trim();
+  if (!trimmed) return "";
+
+  // Remove common WhatsApp noise lines before model pass.
+  const preprocessed = trimmed
+    .split("\n")
+    .filter((line) => {
+      const l = line.trim();
+      if (!l) return false;
+      if (/<Media omitted>/i.test(l)) return false;
+      if (/Messages and calls are end-to-end encrypted/i.test(l)) return false;
+      if (/joined using a group link/i.test(l)) return false;
+      return true;
+    })
+    .join("\n");
+
+  const messages = parseWhatsAppMessages(preprocessed);
+  const profileLikeMessages = selectLikelyBiodataMessages(messages);
+  const reducedInput = profileLikeMessages.length > 0
+    ? profileLikeMessages.join("\n\n---\n\n")
+    : preprocessed;
+
+  // Bigger chunks + cap to keep runtime practical on huge exports.
+  const chunks = splitTextIntoChunks(reducedInput, 26000).slice(0, 8);
+  const allRows: string[] = [];
+
+  for (const [idx, chunk] of chunks.entries()) {
+    const extractPrompt = `You are a matrimonial biodata extraction specialist.
+
+You will be given a WhatsApp chat export chunk. It contains noise + multiple messages.
+Extract ONLY complete matrimonial profile entries and return a pipe-delimited (|) table.
+
+HEADERS (must be exact and in this order):
+${MATRIMONIAL_COLUMNS}
+
+STRICT RULES:
+- One profile = one row.
+- Do NOT merge two different people into one row.
+- Ignore chat noise, media markers, admin notes, join/leave logs, stickers, links, greetings.
+- If a field is missing, write "-" only.
+- Keep Contact Numbers as numbers only (multiple separated by commas, never by pipe).
+- Return ONLY table text (header + rows), no markdown.
+
+INPUT CHUNK ${idx + 1}/${chunks.length}:
+${chunk}`;
+
+    const rawPsv = await generateWithRetry(extractPrompt, 2, 1000);
+
+    const refinePrompt = `You are a data refinement engine for matrimonial biodata.
+
+Refine this extracted table and fix row boundaries.
+Do not add or remove people unless a row is clearly a duplicate in this same input.
+
+HEADERS:
+${MATRIMONIAL_COLUMNS}
+
+RULES:
+- Keep exact column order and | delimiter.
+- Keep one person per row.
+- Ensure family-related details go to family columns (Father/Mother/Siblings/In-laws/Grandparents).
+- Keep "-" for unknown fields.
+
+INPUT:
+${rawPsv}
+
+OUTPUT:
+Only refined pipe-delimited table (header + rows).`;
+
+    const refinedPsv = await generateWithRetry(refinePrompt, 2, 1000);
+    const translatedPsv = await translatePsvToRoman(refinedPsv);
+    const rows = extractPsvRows(translatedPsv);
+    if (rows.length === 0) continue;
+
+    // Keep first header only, skip repeated headers from subsequent chunks.
+    if (allRows.length === 0) {
+      allRows.push(rows[0], ...rows.slice(1));
+    } else {
+      allRows.push(...rows.slice(1));
+    }
+  }
+
+  if (allRows.length === 0) return "";
+  const deduped = dedupePsvRows(allRows);
+  return psvToCsv(deduped.join("\n"), DELIMITER);
 }

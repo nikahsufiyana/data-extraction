@@ -3,14 +3,15 @@
 import { useRef, useState, useCallback } from "react";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore – lucide-react named export resolution issue on external drive
-import { Upload, X, CheckCircle2, Loader2, AlertCircle, ImagePlus } from "lucide-react";
+import { Upload, X, CheckCircle2, Loader2, AlertCircle, ImagePlus, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 export interface QueuedFile {
   id: string;
   file: File;
-  preview: string;
+  preview?: string;
+  kind: "image" | "text";
   status: "pending" | "processing" | "done" | "error";
   error?: string;
 }
@@ -31,14 +32,17 @@ export function UploadArea({ onFilesQueued, queuedFiles, onRemoveFile, isLoading
       const valid: QueuedFile[] = [];
       const arr = Array.from(incoming);
       for (const file of arr) {
-        if (!file.type.startsWith("image/")) {
-          toast.error(`"${file.name}" is not an image — skipped`);
+        const isImage = file.type.startsWith("image/");
+        const isText = file.type.startsWith("text/") || file.name.toLowerCase().endsWith(".txt");
+        if (!isImage && !isText) {
+          toast.error(`"${file.name}" is not an image or text file — skipped`);
           continue;
         }
         valid.push({
           id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
           file,
-          preview: URL.createObjectURL(file),
+          preview: isImage ? URL.createObjectURL(file) : undefined,
+          kind: isImage ? "image" : "text",
           status: "pending",
         });
       }
@@ -89,7 +93,7 @@ export function UploadArea({ onFilesQueued, queuedFiles, onRemoveFile, isLoading
         <input
           ref={inputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,.txt,text/plain"
           multiple
           onChange={handleInputChange}
           disabled={isLoading}
@@ -100,10 +104,10 @@ export function UploadArea({ onFilesQueued, queuedFiles, onRemoveFile, isLoading
             <ImagePlus className="h-7 w-7 text-rose-500" />
           </div>
           <p className="text-base font-semibold text-gray-700 mb-1">
-            {isDragActive ? "Drop images here…" : "Drag & drop images here"}
+            {isDragActive ? "Drop files here…" : "Drag & drop images or .txt files"}
           </p>
           <p className="text-sm text-gray-500 mb-4">
-            You can select <span className="font-semibold text-rose-500">multiple images</span> at once — all profiles go into one sheet
+            You can select <span className="font-semibold text-rose-500">multiple files</span> at once — all profiles go into one sheet
           </p>
           <Button
             type="button"
@@ -114,7 +118,7 @@ export function UploadArea({ onFilesQueued, queuedFiles, onRemoveFile, isLoading
             onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}
           >
             <Upload className="mr-2 h-4 w-4" />
-            {queuedFiles.length > 0 ? "Add More Images" : "Select Images"}
+            {queuedFiles.length > 0 ? "Add More Files" : "Select Files"}
           </Button>
         </div>
       </div>
@@ -124,7 +128,7 @@ export function UploadArea({ onFilesQueued, queuedFiles, onRemoveFile, isLoading
         <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm font-semibold text-gray-700">
-              {queuedFiles.length} image{queuedFiles.length !== 1 ? "s" : ""} queued
+              {queuedFiles.length} file{queuedFiles.length !== 1 ? "s" : ""} queued
               {" · "}
               <span className="text-emerald-600">{queuedFiles.filter(f => f.status === "done").length} done</span>
               {queuedFiles.some(f => f.status === "error") && (
@@ -139,11 +143,18 @@ export function UploadArea({ onFilesQueued, queuedFiles, onRemoveFile, isLoading
             {queuedFiles.map((qf) => (
               <div key={qf.id} className="relative group rounded-lg overflow-hidden border border-gray-200 aspect-square bg-gray-50">
                 {/* Thumbnail */}
-                <img
-                  src={qf.preview}
-                  alt={qf.file.name}
-                  className="h-full w-full object-cover"
-                />
+                {qf.kind === "image" && qf.preview ? (
+                  <img
+                    src={qf.preview}
+                    alt={qf.file.name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="h-full w-full flex flex-col items-center justify-center gap-1 text-gray-500 px-2 text-center">
+                    <FileText className="h-8 w-8 text-rose-400" />
+                    <span className="text-[10px] leading-tight break-words">{qf.file.name}</span>
+                  </div>
+                )}
 
                 {/* Overlay for status */}
                 <div className={`absolute inset-0 flex items-center justify-center transition-all ${

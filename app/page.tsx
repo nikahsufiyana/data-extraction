@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Play, Trash2, RotateCcw } from "lucide-react";
 
 const STEPS = [
-  { id: 1, label: "Upload images" },
+  { id: 1, label: "Upload files" },
   { id: 2, label: "AI extracts profiles" },
   { id: 3, label: "Refine & validate data" },
   { id: 4, label: "Review & export" },
@@ -41,7 +41,7 @@ export default function Home() {
   const handleRemoveFile = useCallback((id: string) => {
     setQueuedFiles((prev) => {
       const f = prev.find((x) => x.id === id);
-      if (f) URL.revokeObjectURL(f.preview);
+      if (f?.preview) URL.revokeObjectURL(f.preview);
       return prev.filter((x) => x.id !== id);
     });
   }, []);
@@ -66,7 +66,7 @@ export default function Home() {
   const handleProcessAll = async () => {
     const pending = queuedFiles.filter((f) => f.status === "pending");
     if (pending.length === 0) {
-      toast.error("No pending images to process");
+      toast.error("No pending files to process");
       return;
     }
 
@@ -115,11 +115,11 @@ export default function Home() {
     setIsProcessing(false);
 
     if (successCount > 0 && failCount === 0) {
-      toast.success(`✅ ${allNewRows.length} profile${allNewRows.length !== 1 ? "s" : ""} extracted from ${successCount} image${successCount !== 1 ? "s" : ""}`);
+      toast.success(`✅ ${allNewRows.length} profile${allNewRows.length !== 1 ? "s" : ""} extracted from ${successCount} file${successCount !== 1 ? "s" : ""}`);
     } else if (successCount > 0 && failCount > 0) {
-      toast.warning(`⚠️ ${allNewRows.length} profiles extracted — ${failCount} image${failCount !== 1 ? "s" : ""} failed`);
+      toast.warning(`⚠️ ${allNewRows.length} profiles extracted — ${failCount} file${failCount !== 1 ? "s" : ""} failed`);
     } else {
-      toast.error("All images failed to extract. Please try again.");
+      toast.error("All files failed to extract. Please try again.");
       setCurrentStep(1);
     }
   };
@@ -127,7 +127,9 @@ export default function Home() {
   const handleRowsChange = (newRows: DataRow[]) => setRows(newRows);
 
   const handleClearAll = () => {
-    queuedFiles.forEach((f) => URL.revokeObjectURL(f.preview));
+    queuedFiles.forEach((f) => {
+      if (f.preview) URL.revokeObjectURL(f.preview);
+    });
     setQueuedFiles([]);
     setHeaders([]);
     setRows([]);
@@ -142,7 +144,7 @@ export default function Home() {
     setRows([]);
     headersRef.current = [];
     setHeaders([]);
-    toast.success("Results cleared — images still queued");
+    toast.success("Results cleared — files still queued");
   };
 
   const pendingCount = queuedFiles.filter((f) => f.status === "pending").length;
@@ -213,9 +215,9 @@ export default function Home() {
           <div className="rounded-xl bg-white p-6 shadow-md border border-gray-100">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="text-lg font-bold text-gray-900">Image Queue</h2>
+                <h2 className="text-lg font-bold text-gray-900">File Queue</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Add as many images as you like — all profiles land in one sheet
+                  Add images or WhatsApp text exports — all profiles land in one sheet
                 </p>
               </div>
               {queuedFiles.length > 0 && (
@@ -254,7 +256,7 @@ export default function Home() {
                   ) : (
                     <>
                       <Play className="mr-2 h-4 w-4" />
-                      Extract {pendingCount} Image{pendingCount !== 1 ? "s" : ""}
+                      Extract {pendingCount} File{pendingCount !== 1 ? "s" : ""}
                     </>
                   )}
                 </Button>
@@ -279,7 +281,7 @@ export default function Home() {
                   className="border-red-300 text-red-600 hover:bg-red-50"
                 >
                   <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                  Retry {errorFiles.length} Failed Image{errorFiles.length !== 1 ? "s" : ""}
+                  Retry {errorFiles.length} Failed File{errorFiles.length !== 1 ? "s" : ""}
                 </Button>
               </div>
             )}
@@ -295,7 +297,7 @@ export default function Home() {
                     {rows.length} profile{rows.length !== 1 ? "s" : ""} · cleaned · validated · tagged
                     {queuedFiles.filter(f => f.status === "done").length > 0 && (
                       <span className="ml-1 text-gray-400">
-                        from {queuedFiles.filter(f => f.status === "done").length} image{queuedFiles.filter(f => f.status === "done").length !== 1 ? "s" : ""}
+                        from {queuedFiles.filter(f => f.status === "done").length} file{queuedFiles.filter(f => f.status === "done").length !== 1 ? "s" : ""}
                       </span>
                     )}
                   </p>
@@ -322,8 +324,8 @@ export default function Home() {
         <div className="mt-10 rounded-xl bg-gradient-to-r from-rose-50 to-emerald-50 border border-rose-100 p-6">
           <h3 className="font-semibold text-gray-800 mb-3">🔍 How it works</h3>
           <div className="grid gap-2 sm:grid-cols-2 text-sm text-gray-600">
-            <div className="flex gap-2"><span className="font-bold text-rose-500">1.</span><span>Upload one or many matrimonial newspaper images</span></div>
-            <div className="flex gap-2"><span className="font-bold text-rose-500">2.</span><span>Click "Extract" — Gemini AI processes each image in sequence</span></div>
+            <div className="flex gap-2"><span className="font-bold text-rose-500">1.</span><span>Upload newspaper images and/or WhatsApp .txt exports</span></div>
+            <div className="flex gap-2"><span className="font-bold text-rose-500">2.</span><span>Click "Extract" — Gemini AI processes each file in sequence</span></div>
             <div className="flex gap-2"><span className="font-bold text-rose-500">3.</span><span>All profiles are merged into a single refined &amp; tagged sheet</span></div>
             <div className="flex gap-2"><span className="font-bold text-rose-500">4.</span><span>Review, edit, then export as one clean CSV file</span></div>
           </div>
