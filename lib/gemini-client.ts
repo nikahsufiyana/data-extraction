@@ -282,8 +282,13 @@ function splitTextIntoChunks(input: string, maxChars = 18000): string[] {
 function parseWhatsAppMessages(raw: string): string[] {
   const lines = raw.split("\n");
   const messages: string[] = [];
+  const sanitizeLine = (line: string) =>
+    line
+      .replace(/^\uFEFF/, "")
+      .replace(/^[\u200E\u200F\u202A-\u202E]+/, "")
+      .trimStart();
   const oldFormatRe =
-    /^\d{1,2}\/\d{1,2}\/\d{2,4},\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s?[APMapm]{2})?\s+-\s+/;
+    /^\d{1,2}\/\d{1,2}\/\d{2,4},\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s?[APMapm]{2})?\s+[-–—]\s+/;
   const newBracketFormatRe =
     /^\[\d{1,2}\/\d{1,2}\/\d{2,4},\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s?[APMapm]{2})?\]\s+/;
   let current = "";
@@ -303,7 +308,8 @@ function parseWhatsAppMessages(raw: string): string[] {
     return line.trim();
   };
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    const line = sanitizeLine(rawLine);
     if (isBoundary(line)) {
       if (current.trim()) messages.push(current.trim());
       current = stripPrefix(line);
@@ -322,6 +328,10 @@ function selectLikelyBiodataMessages(messages: string[]): string[] {
     "family details", "father", "mother", "brother", "sister", "in law", "grand",
     "marital status", "sect", "maslak", "requirement", "preference", "contact",
     "phone", "mobile", "residence", "native place",
+    // Roman Urdu and Urdu-script signals
+    "rishta", "nikah", "nikahs", "taleem", "talim", "taaleem", "umar", "qad", "height:",
+    "larka", "ladka", "ladki", "dulha", "dulhan", "maslak", "firqa", "cast", "zaat",
+    "رشتہ", "نکاح", "عمر", "قد", "تعلیم", "ملازمت", "پیشہ", "خاندان", "والد", "والدہ", "رابطہ",
   ];
 
   const adminNoise = [
@@ -339,7 +349,8 @@ function selectLikelyBiodataMessages(messages: string[]): string[] {
     if (adminNoise.some((n) => low.includes(n))) continue;
     if (msg.length < 40) continue;
     const hits = keywords.reduce((acc, k) => acc + (low.includes(k) ? 1 : 0), 0);
-    if (hits >= 2 || msg.length > 300) likely.push(msg);
+    const hasPhone = /(?:\+?\d[\d\s\-().]{7,}\d)/.test(msg);
+    if (hits >= 1 || hasPhone || msg.length > 300) likely.push(msg);
   }
   return likely;
 }
