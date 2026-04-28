@@ -378,6 +378,22 @@ function dedupePsvRows(rows: string[]): string[] {
   return out;
 }
 
+function extractPhoneNumbers(text: string): string[] {
+  if (!text) return [];
+  const candidates = text.match(/(?:\+?\d[\d\s\-().]{6,}\d)/g) ?? [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of candidates) {
+    const compact = raw.replace(/[^\d+]/g, "");
+    const digits = compact.replace(/\D/g, "");
+    if (digits.length < 7 || digits.length > 15) continue;
+    if (seen.has(digits)) continue;
+    seen.add(digits);
+    out.push(compact.startsWith("+") ? `+${digits}` : digits);
+  }
+  return out;
+}
+
 function cleanField(value: string): string {
   const v = (value || "")
     .replace(/\*/g, "")
