@@ -282,14 +282,31 @@ function splitTextIntoChunks(input: string, maxChars = 18000): string[] {
 function parseWhatsAppMessages(raw: string): string[] {
   const lines = raw.split("\n");
   const messages: string[] = [];
-  const timestampRe = /^\d{1,2}\/\d{1,2}\/\d{2},\s+\d{1,2}:\d{2}/;
+  const oldFormatRe =
+    /^\d{1,2}\/\d{1,2}\/\d{2,4},\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s?[APMapm]{2})?\s+-\s+/;
+  const newBracketFormatRe =
+    /^\[\d{1,2}\/\d{1,2}\/\d{2,4},\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s?[APMapm]{2})?\]\s+/;
   let current = "";
 
+  const isBoundary = (line: string) =>
+    oldFormatRe.test(line) || newBracketFormatRe.test(line);
+
+  const stripPrefix = (line: string): string => {
+    if (oldFormatRe.test(line)) {
+      // "12/05/24, 9:30 PM - Name: message" -> "Name: message"
+      return line.replace(oldFormatRe, "").trim();
+    }
+    if (newBracketFormatRe.test(line)) {
+      // "[12/05/2024, 9:30:12 PM] Name: message" -> "Name: message"
+      return line.replace(newBracketFormatRe, "").trim();
+    }
+    return line.trim();
+  };
+
   for (const line of lines) {
-    if (timestampRe.test(line)) {
+    if (isBoundary(line)) {
       if (current.trim()) messages.push(current.trim());
-      const parts = line.split(" - ");
-      current = parts.length > 1 ? parts.slice(1).join(" - ").trim() : line.trim();
+      current = stripPrefix(line);
     } else {
       current += `${current ? "\n" : ""}${line}`;
     }
@@ -432,7 +449,12 @@ Only refined pipe-delimited table (header + rows).`;
     }
   }
 
-  if (allRows.length === 0) return "";
+  if (allRows.length === 0) {
+    throw new Error("No matrimonial profiles found in text file");
+  }
   const deduped = dedupePsvRows(allRows);
+  if (deduped.length <= 1) {
+    throw new Error("No matrimonial profiles found in text file");
+  }
   return psvToCsv(deduped.join("\n"), DELIMITER);
 }

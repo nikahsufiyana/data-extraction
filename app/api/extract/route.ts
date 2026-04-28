@@ -37,13 +37,27 @@ export async function POST(request: NextRequest) {
 
     if (rawHeaders.length === 0) {
       return NextResponse.json(
-        { error: "No data could be extracted from the image" },
+        {
+          error: isText
+            ? "No matrimonial profiles found in this text file"
+            : "No data could be extracted from the image",
+        },
         { status: 400 }
       );
     }
 
     // Client-side normalization pass
     const normalizedRows = normalizeDataRows(rawRows);
+    if (normalizedRows.length === 0) {
+      return NextResponse.json(
+        {
+          error: isText
+            ? "No matrimonial profiles found in this text file"
+            : "No profiles could be extracted from the image",
+        },
+        { status: 400 }
+      );
+    }
 
     // Always return canonical matrimonial headers
     const headers = [...MATRIMONIAL_HEADERS];

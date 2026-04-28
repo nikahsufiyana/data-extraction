@@ -60,7 +60,11 @@ export default function Home() {
       headersRef.current = data.headers;
       setHeaders(data.headers);
     }
-    return data.rows as DataRow[];
+    const extractedRows = (data.rows as DataRow[]) ?? [];
+    if (extractedRows.length === 0) {
+      throw new Error("No matrimonial profiles found in this file");
+    }
+    return extractedRows;
   };
 
   const handleProcessAll = async () => {
