@@ -339,18 +339,30 @@ function selectLikelyBiodataMessages(messages: string[]): string[] {
     "<media omitted>",
     "messages and calls are end-to-end encrypted",
     "this message was deleted",
-    "join group",
     "we don't have any agents",
   ];
 
+  const stripNoiseLines = (msg: string): string =>
+    msg
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+      .filter((l) => !/^https?:\/\//i.test(l))
+      .filter((l) => !/^[\W_]+$/u.test(l))
+      .filter((l) => !/join group/i.test(l))
+      .filter((l) => !/nikaah ko assan kariye group admin/i.test(l))
+      .filter((l) => !/do not contact any agents/i.test(l))
+      .join("\n");
+
   const likely: string[] = [];
   for (const msg of messages) {
-    const low = msg.toLowerCase();
+    const cleaned = stripNoiseLines(msg);
+    const low = cleaned.toLowerCase();
     if (adminNoise.some((n) => low.includes(n))) continue;
-    if (msg.length < 40) continue;
+    if (cleaned.length < 40) continue;
     const hits = keywords.reduce((acc, k) => acc + (low.includes(k) ? 1 : 0), 0);
-    const hasPhone = /(?:\+?\d[\d\s\-().]{7,}\d)/.test(msg);
-    if (hits >= 1 || hasPhone || msg.length > 300) likely.push(msg);
+    const hasPhone = /(?:\+?\d[\d\s\-().]{7,}\d)/.test(cleaned);
+    if (hits >= 1 || hasPhone || cleaned.length > 300) likely.push(cleaned);
   }
   return likely;
 }
@@ -615,9 +627,7 @@ Only refined pipe-delimited table (header + rows).`;
   }
 
   // Deterministic fallback parser for WhatsApp biodata templates with heavy noise.
-  const heuristicRows = buildHeuristicPsvRows(
-    profileLikeMessages.length > 0 ? profileLikeMessages : messages
-  );
+  const heuristicRows = buildHeuristicPsvRows(messages);
   if (heuristicRows.length > 1) {
     return psvToCsv(heuristicRows.join("\n"), DELIMITER);
   }
