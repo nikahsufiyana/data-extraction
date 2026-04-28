@@ -378,6 +378,26 @@ function dedupePsvRows(rows: string[]): string[] {
   return out;
 }
 
+function hasMeaningfulValue(v: string): boolean {
+  const t = (v || "").trim();
+  return !!t && t !== "-" && t !== "--" && t.toLowerCase() !== "na" && t.toLowerCase() !== "n/a";
+}
+
+function isMeaningfulPsvRow(row: string): boolean {
+  const cells = row.split(DELIMITER).map((c) => c.trim());
+  if (cells.length < 10) return false;
+  const importantIdx = [0, 2, 3, 4, 5, 6, 7, 10, 12, 20, 21]; // name, age.., contacts
+  const filled = importantIdx.reduce((acc, idx) => acc + (hasMeaningfulValue(cells[idx] ?? "") ? 1 : 0), 0);
+  return filled >= 2;
+}
+
+function keepOnlyMeaningfulRows(rows: string[]): string[] {
+  if (rows.length <= 1) return rows;
+  const header = rows[0];
+  const body = rows.slice(1).filter(isMeaningfulPsvRow);
+  return [header, ...body];
+}
+
 function extractPhoneNumbers(text: string): string[] {
   if (!text) return [];
   const candidates = text.match(/(?:\+?\d[\d\s\-().]{6,}\d)/g) ?? [];
@@ -417,7 +437,7 @@ function buildHeuristicPsvRows(messages: string[]): string[] {
 
   for (const msg of messages) {
     const hasProfileSignals =
-      /full\s*name|his\/her\s*details|bio-?data|marital status|family details/i.test(msg);
+      /full\s*name|(?:^|\s)name\s*[:\-]|his\/her\s*details|bio-?data|marital status|family details/i.test(msg);
     if (!hasProfileSignals) continue;
 
     const name = firstMatch(msg, [
@@ -446,7 +466,11 @@ function buildHeuristicPsvRows(messages: string[]): string[] {
     const motherName = firstMatch(msg, [/\bmother'?s?\s*name\s*[:\-]\s*([^\n]+)/i, /\bmother\s*[:\-]\s*([^\n]+)/i]);
     const brothers = firstMatch(msg, [/\bbrothers?\s*[:\-]\s*([^\n]+)/i]);
     const sisters = firstMatch(msg, [/\bsisters?\s*[:\-]\s*([^\n]+)/i]);
-    const requirements = firstMatch(msg, [/\brequirements?\s*[:\-]\s*([^\n]+)/i, /any\s+other\s+demand\s*[:\-]?\s*([^\n]+)/i]);
+    const requirements = firstMatch(msg, [
+      /\brequirements?\s*[:\-]\s*([^\n]+)/i,
+      /any\s+other\s+demand\s*[:\-]?\s*([^\n]+)/i,
+      /your\s+requirements?\s*[:\-]?\s*([^\n]+)/i,
+    ]);
     const residence = firstMatch(msg, [
       /\bresidence(?:\s+details)?\s*[:\-]\s*([^\n]+)/i,
       /\bnative\s*place\s*[:\-]\s*([^\n]+)/i,
@@ -459,8 +483,10 @@ function buildHeuristicPsvRows(messages: string[]): string[] {
         ? cleanField(`${brothers !== "-" ? `Brothers: ${brothers}` : ""}${brothers !== "-" && sisters !== "-" ? ", " : ""}${sisters !== "-" ? `Sisters: ${sisters}` : ""}`)
         : "-";
 
+    const familySummary = firstMatch(msg, [/#?\s*family\s*details\s*[:\-]\s*([\s\S]{0,250})/i]);
+
     // Skip obvious non-profile blocks.
-    if (name === "-" && contactNumbers === "-" && age === "-" && education === "-") continue;
+    if (name === "-" && contactNumbers === "-" && age === "-" && education === "-" && profession === "-") continue;
 
     const row = [
       name, // Name
@@ -472,7 +498,7 @@ function buildHeuristicPsvRows(messages: string[]): string[] {
       residence, // Location
       maritalStatus, // Marital Status
       sect, // Sect
-      "-", // Family Details
+      familySummary, // Family Details
       fatherName, // Father Name
       "-", // Father Occupation
       motherName, // Mother Name
@@ -496,7 +522,7 @@ function buildHeuristicPsvRows(messages: string[]): string[] {
 
   if (rows.length === 0) return [];
   const withHeader = [MATRIMONIAL_COLUMNS, ...rows];
-  return dedupePsvRows(withHeader);
+  return keepOnlyMeaningfulRows(dedupePsvRows(withHeader));
 }
 
 export async function extractDataFromText(rawText: string): Promise<string> {
@@ -570,7 +596,7 @@ Only refined pipe-delimited table (header + rows).`;
 
     const refinedPsv = await generateWithRetry(refinePrompt, 2, 1000);
     const translatedPsv = await translatePsvToRoman(refinedPsv);
-    const rows = extractPsvRows(translatedPsv);
+    const rows = keepOnlyMeaningfulRows(extractPsvRows(translatedPsv));
     if (rows.length === 0) continue;
 
     // Keep first header only, skip repeated headers from subsequent chunks.
@@ -582,7 +608,7 @@ Only refined pipe-delimited table (header + rows).`;
   }
 
   if (allRows.length > 0) {
-    const deduped = dedupePsvRows(allRows);
+    const deduped = keepOnlyMeaningfulRows(dedupePsvRows(allRows));
     if (deduped.length > 1) {
       return psvToCsv(deduped.join("\n"), DELIMITER);
     }
