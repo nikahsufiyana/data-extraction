@@ -52,8 +52,19 @@ export default function Home() {
     formData.append("file", qf.file);
     const response = await fetch("/api/extract", { method: "POST", body: formData });
     if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.error || "Extraction failed");
+      const raw = await response.text();
+      let errorMessage = "Extraction failed";
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed?.error) errorMessage = parsed.error;
+      } catch {
+        if (response.status === 504) {
+          errorMessage = "Extraction timed out for this large file. Please retry; fallback parser is being used for big WhatsApp exports.";
+        } else if (raw?.trim()) {
+          errorMessage = raw.slice(0, 180);
+        }
+      }
+      throw new Error(errorMessage);
     }
     const data = await response.json();
     if (headersRef.current.length === 0 && data.headers?.length > 0) {

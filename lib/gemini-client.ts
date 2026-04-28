@@ -559,9 +559,22 @@ export async function extractDataFromText(rawText: string): Promise<string> {
   const reducedInput = profileLikeMessages.length > 0
     ? profileLikeMessages.join("\n\n---\n\n")
     : preprocessed;
+  const isHugeExport =
+    messages.length >= 250 ||
+    profileLikeMessages.length >= 120 ||
+    reducedInput.length >= 180000;
+
+  // For very large WhatsApp exports, prefer deterministic parsing first to avoid API timeouts.
+  if (isHugeExport) {
+    const heuristicFirst = buildHeuristicPsvRows(messages);
+    if (heuristicFirst.length > 1) {
+      return psvToCsv(heuristicFirst.join("\n"), DELIMITER);
+    }
+  }
 
   // Bigger chunks + cap to keep runtime practical on huge exports.
-  const chunks = splitTextIntoChunks(reducedInput, 26000).slice(0, 8);
+  const maxChunks = isHugeExport ? 3 : 8;
+  const chunks = splitTextIntoChunks(reducedInput, 26000).slice(0, maxChunks);
   const allRows: string[] = [];
 
   for (const [idx, chunk] of chunks.entries()) {
@@ -607,7 +620,7 @@ OUTPUT:
 Only refined pipe-delimited table (header + rows).`;
 
     const refinedPsv = await generateWithRetry(refinePrompt, 2, 1000);
-    const translatedPsv = await translatePsvToRoman(refinedPsv);
+    const translatedPsv = isHugeExport ? refinedPsv : await translatePsvToRoman(refinedPsv);
     const rows = keepOnlyMeaningfulRows(extractPsvRows(translatedPsv));
     if (rows.length === 0) continue;
 
