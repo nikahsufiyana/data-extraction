@@ -378,6 +378,111 @@ function dedupePsvRows(rows: string[]): string[] {
   return out;
 }
 
+function cleanField(value: string): string {
+  const v = (value || "")
+    .replace(/\*/g, "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!v) return "-";
+  return v.replace(/\|/g, "/");
+}
+
+function firstMatch(text: string, patterns: RegExp[]): string {
+  for (const pattern of patterns) {
+    const m = text.match(pattern);
+    if (m?.[1]) return cleanField(m[1]);
+  }
+  return "-";
+}
+
+function buildHeuristicPsvRows(messages: string[]): string[] {
+  const rows: string[] = [];
+
+  for (const msg of messages) {
+    const hasProfileSignals =
+      /full\s*name|his\/her\s*details|bio-?data|marital status|family details/i.test(msg);
+    if (!hasProfileSignals) continue;
+
+    const name = firstMatch(msg, [
+      /full\s*name\s*[:\-]\s*([^\n]+)/i,
+      /\bname\s*[:\-]\s*([^\n]+)/i,
+    ]);
+    const age = firstMatch(msg, [/\bage\s*[:\-]\s*([^\n]+)/i]);
+    const height = firstMatch(msg, [/\bheight\s*[:\-]\s*([^\n]+)/i]);
+    const education = firstMatch(msg, [
+      /\beducation\s*[:\-]\s*([^\n]+)/i,
+      /\bqualification\s*[:\-]\s*([^\n]+)/i,
+    ]);
+    const profession = firstMatch(msg, [
+      /\bwork\s*\/?\s*job\s*[:\-]\s*([^\n]+)/i,
+      /\bjob\s*[:\-]\s*([^\n]+)/i,
+      /\boccupation\s*[:\-]\s*([^\n]+)/i,
+      /\bbusiness\s*\/?\s*job\s*[:\-]\s*([^\n]+)/i,
+    ]);
+    const maritalStatus = firstMatch(msg, [/\bmarital\s*status\s*[:\-]\s*([^\n]+)/i]);
+    const sect = firstMatch(msg, [
+      /\bmaslak\s*\/?\s*sect\s*[:\-]\s*([^\n]+)/i,
+      /\bsect\s*[:\-]\s*([^\n]+)/i,
+      /\breligion\s*[:\-]\s*([^\n]+)/i,
+    ]);
+    const fatherName = firstMatch(msg, [/\bfather'?s?\s*name\s*[:\-]\s*([^\n]+)/i, /\bfather\s*[:\-]\s*([^\n]+)/i]);
+    const motherName = firstMatch(msg, [/\bmother'?s?\s*name\s*[:\-]\s*([^\n]+)/i, /\bmother\s*[:\-]\s*([^\n]+)/i]);
+    const brothers = firstMatch(msg, [/\bbrothers?\s*[:\-]\s*([^\n]+)/i]);
+    const sisters = firstMatch(msg, [/\bsisters?\s*[:\-]\s*([^\n]+)/i]);
+    const requirements = firstMatch(msg, [/\brequirements?\s*[:\-]\s*([^\n]+)/i, /any\s+other\s+demand\s*[:\-]?\s*([^\n]+)/i]);
+    const residence = firstMatch(msg, [
+      /\bresidence(?:\s+details)?\s*[:\-]\s*([^\n]+)/i,
+      /\bnative\s*place\s*[:\-]\s*([^\n]+)/i,
+    ]);
+
+    const contacts = extractPhoneNumbers(msg).join(", ");
+    const contactNumbers = contacts ? cleanField(contacts) : "-";
+    const siblings =
+      brothers !== "-" || sisters !== "-"
+        ? cleanField(`${brothers !== "-" ? `Brothers: ${brothers}` : ""}${brothers !== "-" && sisters !== "-" ? ", " : ""}${sisters !== "-" ? `Sisters: ${sisters}` : ""}`)
+        : "-";
+
+    // Skip obvious non-profile blocks.
+    if (name === "-" && contactNumbers === "-" && age === "-" && education === "-") continue;
+
+    const row = [
+      name, // Name
+      "-", // Gender
+      age, // Age
+      height, // Height
+      education, // Education
+      profession, // Profession
+      residence, // Location
+      maritalStatus, // Marital Status
+      sect, // Sect
+      "-", // Family Details
+      fatherName, // Father Name
+      "-", // Father Occupation
+      motherName, // Mother Name
+      "-", // Mother Occupation
+      siblings, // Siblings
+      brothers, // Brothers
+      sisters, // Sisters
+      "-", // Brother In Laws
+      "-", // Sister In Laws
+      "-", // Grandparents
+      requirements, // Requirements
+      contactNumbers, // Contact Numbers
+      "-", // Tags
+      "-", // Image
+    ]
+      .map(cleanField)
+      .join(DELIMITER);
+
+    rows.push(row);
+  }
+
+  if (rows.length === 0) return [];
+  const withHeader = [MATRIMONIAL_COLUMNS, ...rows];
+  return dedupePsvRows(withHeader);
+}
+
 export async function extractDataFromText(rawText: string): Promise<string> {
   const trimmed = rawText.trim();
   if (!trimmed) return "";
@@ -460,12 +565,20 @@ Only refined pipe-delimited table (header + rows).`;
     }
   }
 
-  if (allRows.length === 0) {
-    throw new Error("No matrimonial profiles found in text file");
+  if (allRows.length > 0) {
+    const deduped = dedupePsvRows(allRows);
+    if (deduped.length > 1) {
+      return psvToCsv(deduped.join("\n"), DELIMITER);
+    }
   }
-  const deduped = dedupePsvRows(allRows);
-  if (deduped.length <= 1) {
-    throw new Error("No matrimonial profiles found in text file");
+
+  // Deterministic fallback parser for WhatsApp biodata templates with heavy noise.
+  const heuristicRows = buildHeuristicPsvRows(
+    profileLikeMessages.length > 0 ? profileLikeMessages : messages
+  );
+  if (heuristicRows.length > 1) {
+    return psvToCsv(heuristicRows.join("\n"), DELIMITER);
   }
-  return psvToCsv(deduped.join("\n"), DELIMITER);
+
+  throw new Error("No matrimonial profiles found in text file");
 }
